@@ -10,6 +10,7 @@ MIDME.md
 
 kaggle.json
 explore_sift.ipynb
+_test_sift_embeddings.ipynb
 
 verify_sift_features.py
 *.err
