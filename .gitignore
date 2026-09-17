@@ -1,8 +1,16 @@
 MIDME.md
 
-/data
+/data/features
+/data/oxbuildings
+/data/oxford
+/data/paris
 *.zip
 
 /__pycache__
 
+kaggle.json
 explore_sift.ipynb
+
+verify_sift_features.py
+*.err
+*.out

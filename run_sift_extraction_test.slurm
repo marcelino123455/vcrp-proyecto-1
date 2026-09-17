@@ -5,8 +5,8 @@
 # contenido de data/features/sift/ antes de someter el job completo.
 
 #SBATCH --job-name=sift_extraction_test
-#SBATCH --account=<TU_ACCOUNT>          # ajustar
-#SBATCH --partition=<TU_PARTITION_CPU>  # ajustar: NO usar la particion gpu
+#SBATCH --account=tesis          # ajustar
+#SBATCH --partition=standard  # pruebas rapidas en CPU, max 30 min (Khipu)
 #SBATCH -c 4
 #SBATCH --mem=8G
 #SBATCH --time=00:15:00
@@ -16,25 +16,19 @@
 set -uo pipefail
 
 REPO_ROOT="$(pwd)"
-VENV_DIR="$REPO_ROOT/.venv"
-PYTHON_MODULE="python/3.11"  # ajustar al modulo real disponible en tu cluster
+ENV_NAME="vcrp-proyecto-1"
 
 echo "=== Job $SLURM_JOB_ID on $(hostname), repo: $REPO_ROOT ==="
 
+# Lmod y conda pueden referenciar variables no definidas y romper con `set -u`.
 set +u
 module purge
-module load "$PYTHON_MODULE" 2>/dev/null || echo "Aviso: no se pudo cargar modulo $PYTHON_MODULE, se usa python del sistema"
+module load miniconda/3.0
+eval "$(conda shell.bash hook)"
+conda activate "$ENV_NAME"
 set -u
 
-if [[ ! -d "$VENV_DIR" ]]; then
-  echo "=== Creando venv en $VENV_DIR ==="
-  python3 -m venv "$VENV_DIR"
-fi
-
-source "$VENV_DIR/bin/activate"
 echo "=== Python activo: $(which python) ==="
-
-pip install --quiet -r "$REPO_ROOT/requirements.txt"
 
 echo "=== Prueba rapida: --limit 20 por dataset ==="
 srun python 1_feature_extraction_sift.py --workers "$SLURM_CPUS_PER_TASK" --limit 20

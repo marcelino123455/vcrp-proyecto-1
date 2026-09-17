@@ -73,10 +73,21 @@ def extract_sift(sift: cv2.SIFT, image_path: Path) -> tuple[np.ndarray, np.ndarr
     return keypoints_to_array(keypoints), descriptors
 
 
-def _process_one(task: tuple[str, str, str]) -> tuple[str, str, str, np.ndarray, np.ndarray]:
-    """Worker: recibe (dataset, image_id, path_str) y retorna los arrays calculados."""
+def _process_one(
+    task: tuple[str, str, str]
+) -> tuple[str, str, str, np.ndarray | None, np.ndarray | None]:
+    """Worker: recibe (dataset, image_id, path_str) y retorna los arrays calculados.
+
+    Algunas imagenes del dataset original estan corruptas (p.ej. paginas HTML
+    de error guardadas con extension .jpg); se omiten con un aviso en vez de
+    abortar todo el job.
+    """
     dataset, image_id, path_str = task
-    keypoints_arr, descriptors = extract_sift(_worker_sift, Path(path_str))
+    try:
+        keypoints_arr, descriptors = extract_sift(_worker_sift, Path(path_str))
+    except ValueError as e:
+        print(f"Aviso: {e}, se omite.", flush=True)
+        return dataset, image_id, path_str, None, None
     return dataset, image_id, path_str, keypoints_arr, descriptors
 
 
@@ -158,6 +169,9 @@ def main() -> None:
                 for dataset, image_id, path_str, keypoints_arr, descriptors in tqdm(
                     results, total=len(pending_tasks), desc="SIFT"
                 ):
+                    if descriptors is None:
+                        continue
+
                     group = h5f[dataset]
                     img_group = group.create_group(image_id)
                     img_group.create_dataset(
