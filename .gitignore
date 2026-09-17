@@ -1,0 +1,8 @@
+MIDME.md
+
+/data
+*.zip
+
+/__pycache__
+
+explore_sift.ipynb
