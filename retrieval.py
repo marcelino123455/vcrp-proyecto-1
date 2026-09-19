@@ -238,6 +238,275 @@ def rank(sim_row: np.ndarray, names: np.ndarray) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
+# Query expansion
+# --------------------------------------------------------------------------- #
+
+QE_COMPATIBLE_METRICS = ("cosine", "dot")
+
+
+def alpha_query_expansion(
+    Q: np.ndarray,
+    X: np.ndarray,
+    sims: np.ndarray,
+    *,
+    n_qe: int = 10,
+    alpha: float = 3.0,
+    include_query: bool = True,
+) -> np.ndarray:
+    """alpha-weighted Query Expansion (alphaQE).
+
+    Idea, de Chum et al. "Total Recall" (ICCV 2007): la imagen consulta es UNA
+    vista del objeto. Los primeros resultados, si son correctos, son otras
+    vistas del mismo objeto. Promediarlos produce una consulta mas rica, que
+    recupera imagenes que la original no alcanzaba — sobre todo las tomadas
+    desde angulos muy distintos, que son justo las que mas cuestan.
+
+    La version alpha (Radenovic et al., "Fine-tuning CNN Image Retrieval with
+    No Human Annotation") pesa cada vecino por su similitud elevada a alpha:
+
+        q' = normalizar( q + sum_i (q . x_i)^alpha * x_i )
+
+    Con alpha = 0 todos los vecinos del top-n pesan igual y se recupera la
+    Average QE clasica. Subir alpha concentra el peso en los vecinos de los que
+    el sistema esta mas seguro, lo que hace el metodo mucho menos sensible a
+    cuantos vecinos se tomen: un falso positivo en el puesto 8 entra con peso
+    casi nulo en vez de arruinar la consulta. Los autores usan alpha = 3.
+
+    Importante para el reporte: esto NO usa el ground truth en ningun momento,
+    solo los vecinos que el propio sistema devuelve. Es una tecnica legitima de
+    retrieval, no una fuga de informacion.
+
+    Limitacion honesta: la QE clasica aplica verificacion espacial a los
+    vecinos antes de promediarlos, para no expandir con falsos positivos. Aqui
+    se usa el top-n crudo, asi que si la busqueda inicial es mala la expansion
+    puede empeorarla ("query drift"). Por eso conviene barrer n_qe y reportarlo.
+
+    Args:
+        Q: (nq, D) vectores consulta.
+        X: (n, D) base de datos.
+        sims: (nq, n) similitudes ya calculadas (coseno o producto punto).
+        n_qe: cuantos vecinos usar.
+        alpha: exponente del peso.
+        include_query: si suma tambien la consulta original.
+
+    Returns:
+        (nq, D) nuevos vectores consulta, L2-normalizados.
+    """
+    Q = np.atleast_2d(np.asarray(Q, dtype=np.float32))
+    X = np.asarray(X, dtype=np.float32)
+    sims = np.atleast_2d(np.asarray(sims, dtype=np.float32))
+
+    if n_qe <= 0:
+        return _l2(Q)
+    if sims.shape[0] != Q.shape[0] or sims.shape[1] != X.shape[0]:
+        raise ValueError(
+            f"sims {sims.shape} no concuerda con Q {Q.shape} y X {X.shape}"
+        )
+
+    n_qe = min(n_qe, X.shape[0])
+    expanded = np.zeros_like(Q, dtype=np.float32)
+
+    for i in range(Q.shape[0]):
+        row = sims[i]
+        # argpartition evita ordenar toda la base solo para sacar el top-n.
+        top = np.argpartition(-row, n_qe - 1)[:n_qe]
+        top = top[np.argsort(-row[top])]
+
+        # Las similitudes negativas no deben aportar: un vecino "opuesto" no es
+        # evidencia a favor. Se recortan a 0 antes de elevar a alpha, que
+        # ademas evita potencias de numeros negativos.
+        weights = np.power(np.clip(row[top], 0.0, None), alpha).astype(np.float32)
+
+        aggregated = (weights[:, None] * X[top]).sum(axis=0)
+        if include_query:
+            aggregated = aggregated + Q[i]
+        expanded[i] = aggregated
+
+    return _l2(expanded)
+
+
+# --------------------------------------------------------------------------- #
+# Database-side augmentation
+# --------------------------------------------------------------------------- #
+
+
+def database_side_augmentation(
+    X: np.ndarray, *, n_dba: int = 5, alpha: float = 3.0, chunk_size: int = 512
+) -> np.ndarray:
+    """Reemplaza cada vector de la base por una mezcla con sus vecinos.
+
+    Es la QE aplicada del otro lado: si expandir la consulta con sus vecinos
+    ayuda, expandir tambien cada imagen de la base ayuda por el mismo motivo.
+    Cada imagen queda representada por un promedio ponderado de si misma y de
+    las vistas parecidas del mismo objeto, lo que la hace alcanzable desde
+    puntos de vista mas variados.
+
+    Se hace UNA VEZ, sin conocer las consultas, asi que no cuesta nada en
+    tiempo de busqueda. Se combina bien con `alpha_query_expansion`.
+
+    Riesgo: si la base tiene muchas imagenes ambiguas, propaga el error. Por
+    eso n_dba suele ser mas chico que el n de la query expansion.
+    """
+    Xn = _l2(np.asarray(X, dtype=np.float32))
+    n = Xn.shape[0]
+    if n_dba <= 0 or n <= 1:
+        return Xn
+
+    n_dba = min(n_dba, n - 1)
+    out = np.empty_like(Xn)
+
+    for start in range(0, n, chunk_size):
+        block = Xn[start : start + chunk_size]
+        sims = block @ Xn.T  # (b, n)
+
+        for i in range(block.shape[0]):
+            row = sims[i]
+            row[start + i] = -np.inf  # el propio vector se suma aparte
+            top = np.argpartition(-row, n_dba - 1)[:n_dba]
+            weights = np.power(np.clip(row[top], 0.0, None), alpha).astype(np.float32)
+            out[start + i] = block[i] + (weights[:, None] * Xn[top]).sum(axis=0)
+
+    return _l2(out)
+
+
+# --------------------------------------------------------------------------- #
+# Difusion en el grafo de similitud
+# --------------------------------------------------------------------------- #
+
+
+def build_knn_graph(
+    X: np.ndarray, *, k: int = 50, alpha: float = 3.0, chunk_size: int = 512
+):
+    """Grafo k-NN disperso y simetrico sobre la base de datos.
+
+    Cada nodo se conecta a sus k vecinos mas parecidos, con peso
+    similitud^alpha. Elevar a alpha hace que las aristas debiles casi
+    desaparezcan, que es lo que evita que la difusion se escape a otro
+    landmark por una conexion espuria.
+
+    Se simetriza con el maximo, que es una aproximacion barata al grafo
+    k-reciproco: una arista sobrevive si al menos uno de los dos nodos
+    considera vecino al otro.
+    """
+    from scipy import sparse
+
+    Xn = _l2(np.asarray(X, dtype=np.float32))
+    n = Xn.shape[0]
+    k = max(1, min(k, n - 1))
+
+    rows = np.empty(n * k, dtype=np.int32)
+    cols = np.empty(n * k, dtype=np.int32)
+    vals = np.empty(n * k, dtype=np.float32)
+    pos = 0
+
+    for start in range(0, n, chunk_size):
+        block = Xn[start : start + chunk_size]
+        sims = block @ Xn.T  # (b, n)
+
+        for i in range(block.shape[0]):
+            gi = start + i
+            row = sims[i]
+            row[gi] = -np.inf  # sin lazos
+            top = np.argpartition(-row, k - 1)[:k]
+
+            rows[pos : pos + k] = gi
+            cols[pos : pos + k] = top
+            vals[pos : pos + k] = np.power(np.clip(row[top], 0.0, None), alpha)
+            pos += k
+
+    W = sparse.csr_matrix((vals[:pos], (rows[:pos], cols[:pos])), shape=(n, n))
+    W = W.maximum(W.T)
+    W.setdiag(0.0)
+    W.eliminate_zeros()
+    return W
+
+
+def normalize_graph(W):
+    """Normalizacion simetrica S = D^-1/2 W D^-1/2.
+
+    Impide que los nodos muy conectados (los "hubs", tipicos en retrieval de
+    landmarks: una foto generica de cielo se parece un poco a todo) acaparen
+    la masa que se propaga.
+    """
+    from scipy import sparse
+
+    degrees = np.asarray(W.sum(axis=1)).ravel()
+    inv_sqrt = np.zeros_like(degrees, dtype=np.float32)
+    nonzero = degrees > 0
+    inv_sqrt[nonzero] = 1.0 / np.sqrt(degrees[nonzero])
+    D = sparse.diags(inv_sqrt)
+    return (D @ W @ D).astype(np.float32)
+
+
+def diffusion_rerank(
+    S,
+    sims: np.ndarray,
+    *,
+    k_seed: int = 10,
+    alpha: float = 0.9,
+    iters: int = 20,
+) -> np.ndarray:
+    """Re-rankea propagando la similitud por el grafo de la base de datos.
+
+    Idea, de Iscen et al. "Efficient Diffusion on Region Manifolds" (CVPR
+    2017): las imagenes de un mismo landmark no forman una bola en el espacio
+    de descriptores, forman una VARIEDAD alargada — una cadena de vistas donde
+    cada una se parece a la siguiente, pero los extremos no se parecen entre
+    si. La distancia directa no puede recorrer esa cadena; la difusion si,
+    porque propaga la similitud paso a paso por el grafo de vecinos.
+
+    Es justo lo que arregla el fallo tipico de este dataset: la foto tomada
+    desde el lado opuesto del edificio, que ningun descriptor global va a
+    emparejar directamente pero que si esta conectada a traves de vistas
+    intermedias.
+
+    Se resuelve (I - alpha*S) f = y iterativamente:
+
+        f_{t+1} = alpha * S * f_t + (1 - alpha) * y
+
+    que converge porque los autovalores de S estan en [-1, 1] y alpha < 1.
+    Con alpha -> 0 se recupera el ranking original; alpha alto propaga mas
+    lejos y arriesga fugarse a otro landmark.
+
+    Args:
+        S: grafo normalizado (salida de `normalize_graph`).
+        sims: (nq, n) similitudes iniciales.
+        k_seed: cuantos vecinos iniciales siembran la difusion. Sembrar con
+            TODA la fila deja entrar mucho ruido.
+        alpha: cuanto se propaga (tipico 0.9 - 0.99).
+        iters: iteraciones de punto fijo.
+
+    Returns:
+        (nq, n) nuevas puntuaciones, mayor = mas parecido.
+    """
+    sims = np.atleast_2d(np.asarray(sims, dtype=np.float32))
+    nq, n = sims.shape
+    if S.shape[0] != n:
+        raise ValueError(f"el grafo tiene {S.shape[0]} nodos y sims tiene {n} columnas")
+
+    alpha = float(np.clip(alpha, 0.0, 0.999))
+    k_seed = max(1, min(k_seed, n))
+
+    # Semillas: solo los k_seed mejores de cada consulta, recortados a >= 0.
+    Y = np.zeros((nq, n), dtype=np.float32)
+    for i in range(nq):
+        row = sims[i]
+        top = np.argpartition(-row, k_seed - 1)[:k_seed]
+        Y[i, top] = np.clip(row[top], 0.0, None)
+
+    norms = np.linalg.norm(Y, axis=1, keepdims=True)
+    Y = Y / np.maximum(norms, EPS)
+
+    F = Y.copy()
+    for _ in range(iters):
+        # (S @ F.T).T en vez de F @ S: scipy multiplica disperso por denso de
+        # forma eficiente en ese orden y devuelve un ndarray limpio.
+        F = alpha * np.asarray((S @ F.T).T) + (1.0 - alpha) * Y
+
+    return F.astype(np.float32)
+
+
+# --------------------------------------------------------------------------- #
 # Fusion tardia
 # --------------------------------------------------------------------------- #
 

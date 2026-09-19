@@ -53,7 +53,13 @@ from evaluation import (
 from retrieval import (
     METRICS,
     NORMALIZATIONS,
+    QE_COMPATIBLE_METRICS,
+    alpha_query_expansion,
+    build_knn_graph,
+    database_side_augmentation,
+    diffusion_rerank,
     load_embeddings,
+    normalize_graph,
     rank,
     similarity,
     split_ids,
@@ -133,6 +139,39 @@ def parse_args() -> argparse.Namespace:
         default=list(DEFAULT_KS),
         help="Valores de k para Precision@k.",
     )
+    parser.add_argument(
+        "--query-expansion", type=int, default=0,
+        help=(
+            "Si > 0, aplica alpha-weighted Query Expansion promediando los N "
+            "primeros resultados con la consulta y re-rankeando. Solo con "
+            f"metricas {QE_COMPATIBLE_METRICS}. Tipico: 10."
+        ),
+    )
+    parser.add_argument(
+        "--qe-alpha", type=float, default=3.0,
+        help="Exponente del peso en la QE. 0 = Average QE clasica (default: 3).",
+    )
+    parser.add_argument(
+        "--dba", type=int, default=0,
+        help=(
+            "Database-side augmentation: reemplaza cada vector de la base por "
+            "una mezcla con sus N vecinos, una sola vez y sin ver las "
+            "consultas. Tipico: 3-5."
+        ),
+    )
+    parser.add_argument(
+        "--diffusion", type=int, default=0,
+        help=(
+            "Si > 0, re-rankea propagando la similitud por un grafo k-NN de la "
+            "base, con este k. Training-free y agnostico al descriptor. "
+            "Tipico: 50."
+        ),
+    )
+    parser.add_argument("--diffusion-alpha", type=float, default=0.9,
+                        help="Cuanto se propaga la difusion (0-0.999).")
+    parser.add_argument("--diffusion-seeds", type=int, default=10,
+                        help="Cuantos vecinos iniciales siembran la difusion.")
+    parser.add_argument("--diffusion-iters", type=int, default=20)
     parser.add_argument("--gt-dir", default=str(DEFAULT_GT_DIR))
     parser.add_argument("--results-dir", default=str(DEFAULT_RESULTS_DIR))
     parser.add_argument(
@@ -179,32 +218,79 @@ def build_rankings(
     metric: str,
     *,
     exclude_query: bool,
+    query_expansion: int = 0,
+    qe_alpha: float = 3.0,
+    dba: int = 0,
+    diffusion: int = 0,
+    diffusion_alpha: float = 0.9,
+    diffusion_seeds: int = 10,
+    diffusion_iters: int = 20,
     verbose: bool = True,
 ) -> tuple[dict[str, list[str]], dict[str, np.ndarray], list[str]]:
     """Rankea la base completa para cada query.
 
     Devuelve (rankings, similitudes_por_query, queries_no_encontradas).
     """
+    db = X[db_index]
+    db_names = names[db_index]
+
+    # La consulta es una imagen de la propia base, asi que su vector se toma
+    # de `db` y no de `X`: si la base fue aumentada (DBA), la consulta debe
+    # usar la misma representacion aumentada.
+    position_in_db = {int(g): i for i, g in enumerate(db_index)}
+
+    if dba > 0:
+        if verbose:
+            print(f"    DBA: cada imagen de la base mezclada con sus {dba} vecinos")
+        db = database_side_augmentation(db, n_dba=dba, alpha=qe_alpha)
+
     missing: list[str] = []
     rows: list[int] = []
     kept: list[Query] = []
 
     for query in queries:
         row = name_to_row.get((dataset, query.image_id))
-        if row is None:
+        if row is None or row not in position_in_db:
             missing.append(query.query_id)
             continue
-        rows.append(row)
+        rows.append(position_in_db[row])
         kept.append(query)
 
     if not kept:
         return {}, {}, missing
 
-    Q = X[np.asarray(rows)]
-    db = X[db_index]
-    db_names = names[db_index]
+    Q = db[np.asarray(rows)]
 
     sims = similarity(Q, db, metric=metric)
+
+    if query_expansion > 0:
+        if metric not in QE_COMPATIBLE_METRICS:
+            raise SystemExit(
+                f"--query-expansion requiere una metrica de {QE_COMPATIBLE_METRICS}; "
+                f"se recibio '{metric}'. La expansion promedia vectores, asi que "
+                "solo tiene sentido cuando la similitud es un producto punto."
+            )
+        if verbose:
+            print(f"    query expansion: top-{query_expansion}, alpha={qe_alpha}")
+        Q_expanded = alpha_query_expansion(
+            Q, db, sims, n_qe=query_expansion, alpha=qe_alpha
+        )
+        sims = similarity(Q_expanded, db, metric=metric)
+
+    if diffusion > 0:
+        if verbose:
+            print(
+                f"    difusion: grafo k={diffusion}, alpha={diffusion_alpha}, "
+                f"semillas={diffusion_seeds}"
+            )
+        graph = normalize_graph(build_knn_graph(db, k=diffusion))
+        sims = diffusion_rerank(
+            graph,
+            sims,
+            k_seed=diffusion_seeds,
+            alpha=diffusion_alpha,
+            iters=diffusion_iters,
+        )
 
     rankings: dict[str, list[str]] = {}
     sims_by_query: dict[str, np.ndarray] = {}
@@ -292,6 +378,13 @@ def run_configuration(
             dataset,
             metric,
             exclude_query=args.exclude_query,
+            query_expansion=args.query_expansion,
+            qe_alpha=args.qe_alpha,
+            dba=args.dba,
+            diffusion=args.diffusion,
+            diffusion_alpha=args.diffusion_alpha,
+            diffusion_seeds=args.diffusion_seeds,
+            diffusion_iters=args.diffusion_iters,
             verbose=verbose,
         )
 
@@ -370,6 +463,11 @@ def main() -> None:
             "metric": metric,
             "database": args.database,
             "exclude_query": args.exclude_query,
+            "query_expansion": args.query_expansion,
+            "qe_alpha": args.qe_alpha if (args.query_expansion or args.dba) else None,
+            "dba": args.dba,
+            "diffusion": args.diffusion,
+            "diffusion_alpha": args.diffusion_alpha if args.diffusion else None,
             "num_queries": len(result.per_query),
             "mAP": round(result.mean_ap, 6),
             "mAP_simple": round(result.mean_ap_simple, 6),

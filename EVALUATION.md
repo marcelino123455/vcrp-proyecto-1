@@ -119,6 +119,57 @@ que re-extraer features de los 110 recortes y pasarlos aparte. El harness ya
 guarda el bbox en `Query.bbox` y `qualitative.py` lo dibuja, así que el gancho
 está puesto.
 
+## Query expansion
+
+El harness puede aplicar **alpha-weighted Query Expansion** a cualquier
+representación, con `--query-expansion N --qe-alpha A`:
+
+```bash
+python 4_evaluate_retrieval.py --embeddings ... --metric cosine --query-expansion 10
+```
+
+Promedia la consulta con sus N primeros resultados, pesando cada vecino por
+su similitud elevada a alpha, y re-rankea. Con `--qe-alpha 0` se recupera la
+Average QE clásica.
+
+Solo funciona con métricas de producto punto (`cosine`, `dot`), porque la
+expansión promedia vectores; con cualquier otra el runner aborta con un
+mensaje explícito en vez de devolver un número sin sentido.
+
+Dos advertencias que conviene reportar. La QE clásica verifica espacialmente
+los vecinos antes de promediarlos; aquí se usa el top-N crudo, así que si la
+búsqueda inicial es mala la expansión la empeora — es el fenómeno de *query
+drift*, y se ve claro al subir N. Y no usa el ground truth en ningún momento,
+solo los resultados del propio sistema, así que es una técnica legítima y no
+una fuga de información.
+
+## Re-ranking: DBA y difusión
+
+Dos técnicas más, ambas *training-free* y agnósticas al descriptor, así que
+sirven para BoVW, para los globales y para VLAD por igual.
+
+**Database-side augmentation** (`--dba N`) reemplaza cada vector de la base
+por una mezcla ponderada consigo mismo y sus N vecinos. Es la QE aplicada del
+otro lado, se calcula una sola vez sin ver las consultas, y no cuesta nada en
+tiempo de búsqueda.
+
+**Difusión** (`--diffusion K`) construye un grafo k-NN de la base y propaga la
+similitud por él. La idea es que las imágenes de un mismo landmark no forman
+una bola en el espacio de descriptores sino una *variedad* alargada: una
+cadena de vistas donde cada una se parece a la siguiente pero los extremos no
+se parecen entre sí. La distancia directa no puede recorrer esa cadena; la
+difusión sí.
+
+```bash
+python 4_evaluate_retrieval.py --embeddings ... --metric cosine --dba 3
+python 4_evaluate_retrieval.py --embeddings ... --metric cosine --diffusion 50
+```
+
+La difusión solo rinde si la base es grande y tiene esa estructura de
+variedad. En bases chicas el grafo conecta clases distintas de inmediato y
+empeora el resultado — vale la pena reportarlo como resultado negativo si
+ocurre.
+
 ## Extender esto
 
 Para evaluar un descriptor nuevo basta con guardar el `.npz` con el contrato de

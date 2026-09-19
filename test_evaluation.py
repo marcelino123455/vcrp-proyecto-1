@@ -28,7 +28,12 @@ from evaluation import (
     recall_at_k,
 )
 from retrieval import (
+    alpha_query_expansion,
+    build_knn_graph,
+    database_side_augmentation,
+    diffusion_rerank,
     fuse,
+    normalize_graph,
     load_embeddings,
     normalize_features,
     rank,
@@ -396,6 +401,193 @@ def test_fuse_respeta_los_pesos():
 
     empate = fuse([a, b], [0.5, 0.5])
     assert approx(float(empate[0, 0]), float(empate[0, 1]), 1e-6)
+
+
+# --------------------------------------------------------------------------- #
+# Query expansion
+# --------------------------------------------------------------------------- #
+
+
+def test_qe_devuelve_vectores_normalizados():
+    rng = np.random.default_rng(3)
+    X = _l2_rows(rng.random((30, 8)).astype(np.float32))
+    Q = X[:4]
+    sims = similarity(Q, X, metric="cosine")
+
+    out = alpha_query_expansion(Q, X, sims, n_qe=5, alpha=3.0)
+    assert out.shape == Q.shape
+    assert np.allclose(np.linalg.norm(out, axis=1), 1.0, atol=1e-5)
+
+
+def test_qe_con_n_cero_no_cambia_nada():
+    rng = np.random.default_rng(4)
+    X = _l2_rows(rng.random((10, 5)).astype(np.float32))
+    Q = X[:2]
+    sims = similarity(Q, X, metric="cosine")
+    out = alpha_query_expansion(Q, X, sims, n_qe=0)
+    assert np.allclose(out, Q, atol=1e-5)
+
+
+def test_qe_acerca_la_query_a_sus_vecinos():
+    """Con vecinos coherentes, la consulta expandida debe parecerse mas al
+    centro del grupo que la consulta original."""
+    cluster = np.array(
+        [[1.0, 0.0, 0.0], [0.95, 0.05, 0.0], [0.9, 0.1, 0.0], [0.92, 0.08, 0.0]],
+        dtype=np.float32,
+    )
+    lejos = np.array([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0]], dtype=np.float32)
+    X = _l2_rows(np.vstack([cluster, lejos]))
+    Q = X[0:1]
+
+    sims = similarity(Q, X, metric="cosine")
+    Q2 = alpha_query_expansion(Q, X, sims, n_qe=4, alpha=3.0)
+
+    centro = _l2_rows(cluster.mean(axis=0, keepdims=True))
+    antes = float((Q @ centro.T)[0, 0])
+    despues = float((Q2 @ centro.T)[0, 0])
+    assert despues > antes
+
+
+def test_qe_ignora_similitudes_negativas():
+    # Un vecino "opuesto" no debe restar: su peso se recorta a 0.
+    X = np.array([[1.0, 0.0], [-1.0, 0.0]], dtype=np.float32)
+    Q = X[0:1]
+    sims = similarity(Q, X, metric="cosine")
+    out = alpha_query_expansion(Q, X, sims, n_qe=2, alpha=3.0)
+    # Debe seguir apuntando en la direccion original, no cancelarse.
+    assert float((out @ Q.T)[0, 0]) > 0.99
+
+
+def test_qe_alpha_cero_es_average_qe():
+    rng = np.random.default_rng(5)
+    X = _l2_rows(rng.random((12, 6)).astype(np.float32))
+    Q = X[0:1]
+    sims = similarity(Q, X, metric="cosine")
+
+    out = alpha_query_expansion(Q, X, sims, n_qe=3, alpha=0.0)
+
+    order = np.argsort(-sims[0])[:3]
+    manual = X[order].sum(axis=0) + Q[0]
+    manual = manual / np.linalg.norm(manual)
+    assert np.allclose(out[0], manual, atol=1e-5)
+
+
+def test_qe_rechaza_sims_con_forma_incorrecta():
+    X = np.zeros((5, 3), dtype=np.float32)
+    Q = np.zeros((2, 3), dtype=np.float32)
+    try:
+        alpha_query_expansion(Q, X, np.zeros((2, 4), dtype=np.float32), n_qe=2)
+    except ValueError:
+        return
+    raise AssertionError("se esperaba ValueError")
+
+
+def _l2_rows(X: np.ndarray) -> np.ndarray:
+    return X / np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-12)
+
+
+# --------------------------------------------------------------------------- #
+# DBA y difusion
+# --------------------------------------------------------------------------- #
+
+
+def test_dba_devuelve_vectores_normalizados():
+    rng = np.random.default_rng(6)
+    X = rng.random((20, 7)).astype(np.float32)
+    out = database_side_augmentation(X, n_dba=3, alpha=3.0)
+    assert out.shape == X.shape
+    assert np.allclose(np.linalg.norm(out, axis=1), 1.0, atol=1e-5)
+
+
+def test_dba_con_cero_vecinos_solo_normaliza():
+    rng = np.random.default_rng(7)
+    X = rng.random((8, 4)).astype(np.float32)
+    assert np.allclose(database_side_augmentation(X, n_dba=0), _l2_rows(X), atol=1e-6)
+
+
+def test_grafo_knn_es_simetrico_y_sin_lazos():
+    rng = np.random.default_rng(8)
+    X = _l2_rows(rng.random((25, 6)).astype(np.float32))
+    W = build_knn_graph(X, k=4)
+
+    assert W.shape == (25, 25)
+    assert abs((W - W.T)).max() < 1e-6, "el grafo debe ser simetrico"
+    assert np.allclose(W.diagonal(), 0.0), "no debe haber lazos"
+    assert W.nnz > 0
+
+
+def test_grafo_normalizado_no_tiene_nan_con_nodos_aislados():
+    # Un nodo sin aristas tendria grado 0: la normalizacion no debe dividir
+    # por cero.
+    from scipy import sparse
+
+    W = sparse.csr_matrix(np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]], dtype=np.float32))
+    S = normalize_graph(W)
+    assert np.all(np.isfinite(S.toarray()))
+
+
+def test_difusion_recupera_el_extremo_de_la_variedad():
+    """La prueba de fuego de la difusion.
+
+    Cada clase se construye como una CADENA de vistas: los extremos son
+    ortogonales entre si (similitud 0) pero estan unidos por vistas
+    intermedias. El coseno directo no puede cruzar la cadena; la difusion si,
+    porque propaga paso a paso por el grafo de vecinos.
+
+    Es exactamente el fallo que importa en Oxford: la foto del lado opuesto
+    del edificio.
+    """
+    rng = np.random.default_rng(0)
+    dim, n_clases, largo = 64, 6, 20
+
+    vectores, etiquetas = [], []
+    for c in range(n_clases):
+        a = rng.normal(size=dim)
+        a /= np.linalg.norm(a)
+        b = rng.normal(size=dim)
+        b -= (b @ a) * a
+        b /= np.linalg.norm(b)
+        for t in np.linspace(0, np.pi / 2, largo):
+            v = np.cos(t) * a + np.sin(t) * b + rng.normal(0, 0.01, dim)
+            vectores.append(v / np.linalg.norm(v))
+            etiquetas.append(c)
+
+    X = np.asarray(vectores, dtype=np.float32)
+    etiquetas = np.asarray(etiquetas)
+    nombres = np.asarray(
+        [f"c{e}_{i % largo:02d}" for i, e in enumerate(etiquetas)], dtype=object
+    )
+
+    idx_q = [c * largo for c in range(n_clases)]
+    sims = similarity(X[idx_q], X, metric="cosine")
+
+    S = normalize_graph(build_knn_graph(X, k=5))
+    difundido = diffusion_rerank(S, sims, k_seed=5, alpha=0.95, iters=30)
+
+    def calcular_map(scores):
+        aps = []
+        for i, c in enumerate(range(n_clases)):
+            ranked = [str(nombres[j]) for j in np.argsort(-scores[i])]
+            positivos = {str(nombres[j]) for j in np.flatnonzero(etiquetas == c)}
+            aps.append(average_precision(ranked, positivos))
+        return float(np.mean(aps))
+
+    base = calcular_map(sims)
+    con_difusion = calcular_map(difundido)
+
+    assert con_difusion > base, f"difusion={con_difusion} no mejoro sobre {base}"
+    assert con_difusion > 0.99, f"difusion deberia resolver este caso, dio {con_difusion}"
+
+
+def test_difusion_rechaza_grafo_de_tamano_incorrecto():
+    rng = np.random.default_rng(9)
+    X = _l2_rows(rng.random((12, 5)).astype(np.float32))
+    S = normalize_graph(build_knn_graph(X, k=3))
+    try:
+        diffusion_rerank(S, np.zeros((2, 7), dtype=np.float32))
+    except ValueError:
+        return
+    raise AssertionError("se esperaba ValueError")
 
 
 # --------------------------------------------------------------------------- #
