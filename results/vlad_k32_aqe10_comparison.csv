@@ -1,0 +1,2 @@
+run,normalization,metric,database,exclude_query,query_expansion,qe_alpha,dba,diffusion,diffusion_alpha,num_queries,mAP,mAP_simple,mP@1,mP@5,mP@10,mP@20
+vlad_k32_aqe10,none,cosine,same,False,10,0.0,0,0,,55,0.335418,0.341559,0.890909,0.625455,0.545455,0.436364

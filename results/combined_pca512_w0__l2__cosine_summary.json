@@ -1,0 +1,33 @@
+{
+  "run": "combined_pca512_w0",
+  "embeddings": "data/features/global/combined_pca512_w0.npz",
+  "normalization": "l2",
+  "metric": "cosine",
+  "database": "same",
+  "exclude_query": false,
+  "num_images": 11455,
+  "num_dimensions": 512,
+  "num_queries": 55,
+  "mAP": 0.126163,
+  "mAP_simple": 0.128891,
+  "mP@1": 1.0,
+  "mP@5": 0.378182,
+  "mP@10": 0.250909,
+  "mP@20": 0.17,
+  "by_dataset": {
+    "oxford": 0.126163
+  },
+  "by_landmark": {
+    "oxford/all_souls": 0.104909,
+    "oxford/ashmolean": 0.093454,
+    "oxford/balliol": 0.131219,
+    "oxford/bodleian": 0.09221,
+    "oxford/christ_church": 0.093506,
+    "oxford/cornmarket": 0.19265,
+    "oxford/hertford": 0.11626,
+    "oxford/keble": 0.161459,
+    "oxford/magdalen": 0.047177,
+    "oxford/pitt_rivers": 0.171142,
+    "oxford/radcliffe_camera": 0.183808
+  }
+}

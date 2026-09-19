@@ -1,0 +1,33 @@
+{
+  "run": "vlad_k32_aqe10",
+  "embeddings": "data/features/vlad/vlad_k32.npz",
+  "normalization": "none",
+  "metric": "cosine",
+  "database": "same",
+  "exclude_query": false,
+  "num_images": 11455,
+  "num_dimensions": 4096,
+  "num_queries": 55,
+  "mAP": 0.335418,
+  "mAP_simple": 0.341559,
+  "mP@1": 0.890909,
+  "mP@5": 0.625455,
+  "mP@10": 0.545455,
+  "mP@20": 0.436364,
+  "by_dataset": {
+    "oxford": 0.335418
+  },
+  "by_landmark": {
+    "oxford/all_souls": 0.411036,
+    "oxford/ashmolean": 0.189552,
+    "oxford/balliol": 0.295646,
+    "oxford/bodleian": 0.478348,
+    "oxford/christ_church": 0.427901,
+    "oxford/cornmarket": 0.094841,
+    "oxford/hertford": 0.272478,
+    "oxford/keble": 0.65541,
+    "oxford/magdalen": 0.035893,
+    "oxford/pitt_rivers": 0.276105,
+    "oxford/radcliffe_camera": 0.552381
+  }
+}

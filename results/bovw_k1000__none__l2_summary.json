@@ -1,0 +1,33 @@
+{
+  "run": "bovw_k1000",
+  "embeddings": "data/features/vocabulary/image_histograms_k1000.npz",
+  "normalization": "none",
+  "metric": "l2",
+  "database": "same",
+  "exclude_query": false,
+  "num_images": 11455,
+  "num_dimensions": 1000,
+  "num_queries": 55,
+  "mAP": 0.247497,
+  "mAP_simple": 0.251703,
+  "mP@1": 1.0,
+  "mP@5": 0.556364,
+  "mP@10": 0.438182,
+  "mP@20": 0.322727,
+  "by_dataset": {
+    "oxford": 0.247497
+  },
+  "by_landmark": {
+    "oxford/all_souls": 0.287044,
+    "oxford/ashmolean": 0.085481,
+    "oxford/balliol": 0.186205,
+    "oxford/bodleian": 0.140254,
+    "oxford/christ_church": 0.187638,
+    "oxford/cornmarket": 0.160557,
+    "oxford/hertford": 0.282582,
+    "oxford/keble": 0.827722,
+    "oxford/magdalen": 0.046559,
+    "oxford/pitt_rivers": 0.236496,
+    "oxford/radcliffe_camera": 0.281926
+  }
+}

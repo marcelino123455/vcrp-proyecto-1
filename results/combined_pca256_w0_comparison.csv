@@ -1,0 +1,2 @@
+run,normalization,metric,database,exclude_query,query_expansion,qe_alpha,dba,diffusion,diffusion_alpha,num_queries,mAP,mAP_simple,mP@1,mP@5,mP@10,mP@20
+combined_pca256_w0,l2,cosine,same,False,0,,0,0,,55,0.122683,0.125495,1.0,0.36,0.243636,0.164545

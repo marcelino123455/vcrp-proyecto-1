@@ -1,0 +1,2 @@
+run,normalization,metric,database,exclude_query,query_expansion,qe_alpha,dba,diffusion,diffusion_alpha,num_queries,mAP,mAP_simple,mP@1,mP@5,mP@10,mP@20
+vlad_smoke,none,cosine,same,False,0,,0,0,,55,0.36942,0.374672,1.0,0.72,0.570909,0.446364
