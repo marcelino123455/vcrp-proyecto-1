@@ -1,0 +1,2 @@
+run,normalization,metric,database,exclude_query,query_expansion,qe_alpha,dba,diffusion,diffusion_alpha,num_queries,mAP,mAP_simple,mP@1,mP@5,mP@10,mP@20
+color_qualitative,l2,cosine,same,False,0,,0,0,,55,0.094486,0.096569,1.0,0.272727,0.165455,0.104545

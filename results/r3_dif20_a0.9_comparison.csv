@@ -1,0 +1,2 @@
+run,normalization,metric,database,exclude_query,query_expansion,qe_alpha,dba,diffusion,diffusion_alpha,num_queries,mAP,mAP_simple,mP@1,mP@5,mP@10,mP@20
+r3_dif20_a0.9,none,cosine,same,False,0,3.0,5,20,0.9,55,0.663085,0.665514,1.0,0.88,0.732727,0.622727
