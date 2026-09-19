@@ -340,6 +340,11 @@ def main() -> None:
         print(f"  {vacias} imagenes sin descriptores quedan con vector nulo")
 
     pca_info = None
+    # Modelo: lo que hace falta para codificar una imagen NUEVA con este mismo
+    # vocabulario, sin re-entrenar nada. Se usa, por ejemplo, para codificar
+    # consultas recortadas al bounding box (ver 6_bbox_queries.py).
+    modelo: dict[str, np.ndarray] = {"centroids": centroids}
+
     if args.pca > 0:
         from sklearn.decomposition import PCA
 
@@ -352,6 +357,13 @@ def main() -> None:
         if power > 0:
             escala = np.power(np.maximum(pca.explained_variance_, EPS), power).astype(np.float32)
             features = features / escala[None, :]
+
+        modelo.update(
+            pca_mean=pca.mean_.astype(np.float32),
+            pca_components=pca.components_.astype(np.float32),
+            pca_variance=pca.explained_variance_.astype(np.float32),
+            whiten_power=np.float32(power),
+        )
 
         norms = np.linalg.norm(features, axis=1, keepdims=True)
         features = (features / np.maximum(norms, EPS)).astype(np.float32)
@@ -368,6 +380,10 @@ def main() -> None:
         raise SystemExit("VLAD produjo valores no finitos; revisa las normalizaciones.")
 
     np.savez_compressed(out_path, image_ids=image_ids, features=features)
+
+    model_path = out_dir / f"vlad_{tag}_model.npz"
+    np.savez_compressed(model_path, **modelo)
+    print(f"  modelo: {model_path} ({model_path.stat().st_size / 2**20:.0f} MB)")
 
     config = {
         "vocab_size": int(args.vocab_size),
