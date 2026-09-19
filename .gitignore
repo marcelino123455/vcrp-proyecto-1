@@ -15,3 +15,5 @@ _test_sift_embeddings.ipynb
 verify_sift_features.py
 *.err
 *.out
+/results
+/data/groundtruth

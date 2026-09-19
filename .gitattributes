@@ -1,0 +1,27 @@
+# Normalizacion de fin de linea.
+#
+# El proyecto se edita en Windows pero se ejecuta en Khipu (Linux). Si un .sh o
+# un .slurm llega al cluster con CRLF, bash falla con errores poco obvios del
+# tipo "$'\r': command not found" o "/usr/bin/env: 'bash\r': No such file".
+# Forzar LF en scripts y codigo evita esa clase de bug sin importar como se
+# transfieran los archivos (clone, scp, WinSCP, zip).
+
+* text=auto
+
+*.sh    text eol=lf
+*.slurm text eol=lf
+*.py    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.json  text eol=lf
+*.csv   text eol=lf
+
+# Binarios: que Git no intente tocarlos nunca.
+*.tgz binary
+*.tar binary
+*.zip binary
+*.h5  binary
+*.npz binary
+*.pkl binary
+*.jpg binary
+*.png binary
