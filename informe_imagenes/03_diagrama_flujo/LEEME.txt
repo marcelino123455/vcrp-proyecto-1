@@ -1,0 +1,27 @@
+Diagrama de flujo SIFT -> HDF5
+==============================
+
+Esta figura queda pendiente de hacer a mano (draw.io o similar), tal como se
+indico: no sale del codigo.
+
+Sugerencia de contenido para el diagrama, basado en 1_feature_extraction_sift.py:
+
+  [Imagenes data/oxford/*.jpg, data/paris/*.jpg]
+              |
+              v
+  [Pool de workers multiprocessing]
+   cada worker crea su propio cv2.SIFT_create()
+              |
+              v
+  [detectAndCompute por imagen] --> keypoints (x, y, size, angle)
+                                 --> descriptores (N x 128, float32)
+              |
+              v
+  [Proceso principal: escritura incremental, un solo escritor]
+              |
+              v
+  [sift_features.h5]
+     /<dataset>/<image_id>/keypoints    (N, 4)
+     /<dataset>/<image_id>/descriptors  (N, 128)
+     +
+  [sift_index.csv: image_id, dataset, filename, num_keypoints]

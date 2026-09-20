@@ -1,0 +1,6 @@
+Configuracion,mAP,Delta vs. baseline
+Baseline (RootSIFT + intra-norm),0.3957,0.0
++ mass-norm,0.3957,0.0
+sin intra-norm,0.3714,-0.0243
+sin RootSIFT,0.4061,0.0104
+power (SSR) en vez de intra-norm,0.3956,-0.0001
