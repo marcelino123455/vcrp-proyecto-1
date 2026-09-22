@@ -15,3 +15,17 @@ _test_sift_embeddings.ipynb
 verify_sift_features.py
 *.err
 *.out
+/results
+/data/groundtruth
+
+# LaTeX build artifacts
+presentacion/*.aux
+presentacion/*.log
+presentacion/*.nav
+presentacion/*.out
+presentacion/*.snm
+presentacion/*.toc
+presentacion/*.vrb
+presentacion/*.fls
+presentacion/*.fdb_latexmk
+presentacion/*.synctex.gz

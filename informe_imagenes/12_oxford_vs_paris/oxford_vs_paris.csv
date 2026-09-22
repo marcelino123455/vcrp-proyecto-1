@@ -1,0 +1,6 @@
+Dataset,Configuracion,mAP
+Oxford,"VLAD (K=256, PCA512)",0.528195
+Oxford,+ DBA + Difusion,0.705348
+Paris,"VLAD (K=256, PCA512)",0.551356
+Paris,+ DBA + Difusion,0.811867
+Oxford+Paris (110 queries),+ DBA + Difusion,0.758608

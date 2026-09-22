@@ -1,0 +1,8 @@
+Configuracion,mAP,Delta vs. base
+Base (sin re-ranking),0.5282,0.0
++ Query Expansion (top-10),0.5545,0.0263
++ DBA (n=5),0.5817,0.0535
++ DBA(3) + Query Expansion(10),0.5945,0.0663
+"+ Difusion (k=50, sin DBA)",0.678,0.1498
++ DBA(5) + Difusion(k=100),0.696,0.1678
+"+ DBA(5) + Difusion(k=100, seeds=5) [FINAL]",0.7053,0.1771

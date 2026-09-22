@@ -1,0 +1,10 @@
+Representacion,mAP,mAP_simple,P@5,P@10
+VLAD + DBA + Difusion (mejor pipeline),0.7053,0.7082,0.8436,0.7509
+Fusion tardia (VLAD + Global),0.5337,0.5372,0.8364,0.6945
+"VLAD (K=256, PCA512)",0.5282,0.5317,0.8364,0.6891
+"BoVW (K=4096, TF-IDF, mejor del barrido)",0.3136,0.3197,0.6436,0.5145
+"Combinado global (PCA512, w=0.5)",0.1644,0.1677,0.4764,0.3564
+HOG,0.1467,0.1492,0.4582,0.3182
+GIST,0.1427,0.1459,0.44,0.3127
+LBP,0.1072,0.1093,0.3018,0.1909
+Color (histograma HSV),0.1049,0.1075,0.3055,0.1982

@@ -1,0 +1,5 @@
+Representacion,mAP Oxford,mAP Paris
+VLAD + DBA + Difusion,0.7053,0.8119
+Fusion (VLAD + Global),0.5337,0.5581
+"VLAD (K=256, PCA512)",0.5282,0.5514
+BoVW (K=4096),0.3136,0.3641

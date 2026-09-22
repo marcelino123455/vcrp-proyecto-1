@@ -1,0 +1,5 @@
+run,normalization,metric,database,exclude_query,query_expansion,qe_alpha,dba,diffusion,diffusion_alpha,num_queries,mAP,mAP_simple,mP@1,mP@5,mP@10,mP@20
+hog,l2,cosine,same,False,0,,0,0,,55,0.144156,0.14647,1.0,0.454545,0.318182,0.217273
+hog,l2,chi2,same,False,0,,0,0,,55,0.146707,0.149237,1.0,0.458182,0.318182,0.215455
+hog,l2,hellinger,same,False,0,,0,0,,55,0.128882,0.130553,1.0,0.414545,0.281818,0.185455
+hog,l2,l2,same,False,0,,0,0,,55,0.144156,0.14647,1.0,0.454545,0.318182,0.217273
